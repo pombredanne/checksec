@@ -6,19 +6,19 @@ from checksec import process_file, Elf
 from elftools.common.exceptions import ELFError
 
 import sys
-import cStringIO
+from six.moves import cStringIO
 
 try:
     import libarchive
 except ImportError:
-    print >> sys.stderr, "Please install python-libarchive package."
+    print("Please install python-libarchive package.")
     sys.exit(-1)
 
 try:
     import rpm
-except ImportError, exc:
-    print exc
-    print >> sys.stderr, "Please install rpm-python package"
+except ImportError as exc:
+    print(exc)
+    print("Please install rpm-python package")
     sys.exit(-1)
 
 import os
@@ -40,12 +40,12 @@ def analyze(rpmfile, show_errors=False, opformat="json"):
         return
 
     if not rpmfile.endswith(".rpm"):
-        print >> sys.stderr, "skipping %s" % os.path.basename(rpmfile)
+        # print >> sys.stderr, "skipping %s" % os.path.basename(rpmfile)
         return
 
     try:
         a = libarchive.Archive(rpmfile)
-    except Exception, exc:
+    except Exception as exc:
         print >> sys.stderr, rpmfile, str(exc)
         return
 
@@ -55,7 +55,7 @@ def analyze(rpmfile, show_errors=False, opformat="json"):
         fd = os.open(rpmfile, os.O_RDONLY)
         h = ts.hdrFromFdno(fd)
         os.close(fd)
-    except Exception, exc:
+    except Exception as exc:
         print >> sys.stderr, rpmfile, str(exc)
         return
 
@@ -71,10 +71,10 @@ def analyze(rpmfile, show_errors=False, opformat="json"):
     users = h[rpm.RPMTAG_FILEUSERNAME]
     lookup = defaultdict(list)
     for n, u, g in zip(names, users, groups):
-        lookup[n].append((u,g))
+        lookup[n].append((u, g))
 
     filecaps = []
-    for i,cap in enumerate(caps):
+    for i, cap in enumerate(caps):
         if cap:
             filecaps.append([names[i], cap])
 
@@ -127,8 +127,8 @@ def analyze(rpmfile, show_errors=False, opformat="json"):
                 directory = True
 
         # check for executable flag
-        if not (entry.mode & 0111):
-            continue
+        # if not (entry.mode & 0111):
+        #    continue
 
         # always report setxid files
         if ((entry.mode & stat.S_ISUID) or (stat.S_ISGID & entry.mode)):
@@ -149,17 +149,19 @@ def analyze(rpmfile, show_errors=False, opformat="json"):
         returncode = -1
         if not directory:
             try:
-                fh = cStringIO.StringIO(contents)
+                fh = cStringIO(contents)
                 elf = Elf(fh)
                 if opformat == "json":
-                    out = process_file(elf, deps = True)
+                    out = process_file(elf, deps=True)
                     # polkit check 2
                     if "polkit" in out:
                         output["polkit"] = True
                 else:
                     out = process_file(elf)
-                dataline = "%s,%s,%s,mode=%s,%s" % (package, os.path.basename(rpmfile),
-                                            filename, oct(entry.mode), out)
+                dataline = "%s,%s,%s,mode=%s,%s" % (package,
+                                                    os.path.basename(rpmfile),
+                                                    filename, oct(entry.mode),
+                                                    out)
                 returncode = 0
             except ELFError as exc:
                 if show_errors:
@@ -220,11 +222,12 @@ def output_callback(result):
         if result:
             print(result)
 
+
 def main():
     if len(sys.argv) < 2:
-        sys.stderr.write("Usage: %s <path to RPM files> " \
-            "[output format (csv / json)] [existing JSON file]\n" \
-            % sys.argv[0])
+        sys.stderr.write("Usage: %s <path to RPM files> "
+                    "[output format (csv / json)] [existing JSON file]\n"
+                    % sys.argv[0])
         sys.exit(-1)
 
     path = sys.argv[1]
@@ -237,7 +240,7 @@ def main():
     parallel = True
     # parallel = False
     if parallel:
-        p = multiprocessing.Pool(2) # FIXME add autodetection?
+        p = multiprocessing.Pool(5)  # FIXME add autodetection?
 
     # pruning code to make analysis faster
     if (len(sys.argv) > 3):
@@ -261,13 +264,15 @@ def main():
         for (path, _, files) in os.walk(path):
             for fname in files:
                 rpmfile = os.path.join(path, fname)
+                if "-debuginfo-" in rpmfile or rpmfile.endswith(".drpm"):
+                    continue
                 #if os.path.basename(rpmfile) in data:
                     # print >> sys.stderr, "Skipping", rpmfile
                 #    pass
                 if parallel:
                     outputmap[rpmfile] = p.apply_async(analyze,
                             (rpmfile, False, opformat),
-                            callback = output_callback)
+                            callback=output_callback)
                 else:
                     out = analyze(path, opformat=opformat)
                     if out:

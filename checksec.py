@@ -112,7 +112,7 @@ class Elf(object):
         out = p.communicate(input=data)[0]
 
         for line in out.splitlines():
-            if re.match("^/tmp/.+", line) and "XXX" not in line:
+            if re.match(b"^/tmp/.+", line) and "XXX" not in line:
                 ret.append(line)
 
         return ret
@@ -143,7 +143,7 @@ class Elf(object):
     # XXX implement this
     def chroot_without_chdir(self):
         """
-        Check forapps that use chroot(2) without using chdir(2).
+        Check for apps that use chroot(2) without using chdir(2).
 
         Inspired by http://people.redhat.com/sgrubb/security/find-chroot
 
@@ -154,12 +154,21 @@ class Elf(object):
         """
         Check if source code was compiled with FORTIFY_SOURCE.
 
-        NA : FORTIFY_SOURCE was not applicable
-        Enabled : unsafe and _chk functions were found
-        Disabled : only unsafe functions were found (_chk functions missing)
+        Enabled : no unsafe functions were found OR all were translated to _chk versions
+        Partial : unprotected unsafe functions were found
+
+        TODO
+        ====
+
+        * Print summary report like checksec.sh does
+
+        * Drop CSV output support (it is too restrictive)
+
+        * "addr2line" like feature for unprotected unsafe functions
 
         """
-        ret = "NA"
+        unsafe_list = []
+
         for section in self.elffile.iter_sections():
             if not isinstance(section, SymbolTableSection):
                 continue
@@ -170,22 +179,14 @@ class Elf(object):
                 continue
             for _, symbol in enumerate(section.iter_symbols()):
                 for pattern in UNSAFE_FUNCTIONS:
-                    if re.match(pattern, bytes2str(symbol.name)):
-                        if ret == "NA":
-                            ret = "Disabled"
-                            break
+                    if re.match(pattern + "$", bytes2str(symbol.name)):
+                        unsafe_list.append(bytes2str(symbol.name))
 
-            if ret == "Disabled":
-                # afename = "__" + bytes2str(symbol.name) + "_chk"
-                for _, symbol in enumerate(section.iter_symbols()):
-                    # first look for corresponding _chk symbol
-                    symbolstr = bytes2str(symbol.name)
-                    if (symbolstr.startswith("__") and
-                            symbolstr.endswith("_chk")) or \
-                            symbolstr.endswith(" __chk_fail"):
-                        ret = "Enabled"
-                        break
-        return ret
+        if len(unsafe_list) == 0:
+            return "Enabled"
+        else:
+            return "Partial$" + "$".join(unsafe_list)
+
 
     def canary(self):
         for section in self.elffile.iter_sections():
@@ -217,11 +218,16 @@ class Elf(object):
             #      file=sys.stderr)
             return
 
+        found = False
         for segment in self.elffile.iter_segments():
             if re.search("GNU_STACK", str(segment['p_type'])):
+                found = True
                 if segment['p_flags'] & pflags.PF_X:
                     return "Disabled"
-        return "Enabled"
+        if found:
+            return "Enabled"
+
+        return "Disabled"
 
     def relro(self):
         if self.elffile.num_segments() == 0:
